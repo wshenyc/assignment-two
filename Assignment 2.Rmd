@@ -484,8 +484,12 @@ ggplot(mci_approved_joined) +
 I used the following url to get the J-51 tax abatement filings from DOF for the tax years 2000-2014: https://data.cityofnewyork.us/resource/y7az-s7wc.csv?$query=select b, block, lot, ex_years, tax_year  where tax_year > '1999' and tax_year < '2015' limit 10000000
 
 ```{r}
+# In my RStudio project, I just directly uploaded the DOF file but since Github has a 25mb limit, switched to this API call.
 
-tax_filings <- read_csv("dof_j51_data.csv")
+tax_filings_query <- str_glue(
+  "https://data.cityofnewyork.us/resource/y7az-s7wc.csv?$query=select b, block, lot, ex_years, tax_year  where tax_year > '1999' and tax_year < '2015' limit 10000000")
+
+tax_filings <- read_csv(URLencode(tax_filings_query))
 
 
 ```
