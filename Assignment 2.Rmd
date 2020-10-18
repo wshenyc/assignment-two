@@ -1,0 +1,566 @@
+---
+title: "URPL-GP-1620: Assignment 2"
+author: "Winnie Shen"
+date: "10/18/2020"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(DT)
+library(sf)
+```
+
+
+# MCI Data
+
+The Major Capital Improvement (MCI) data was very kindly provided by Sam, who said the Urban Justice Center received it from a FOIL request submitted to NYS Housing and Community Renewal (HCR).
+
+```{r}
+
+mci_initial <- read_csv("mci_00_14.csv")
+
+```
+
+### Basic Math Calculations with the MCI Data
+
+Here I am calculating how many buildings are in the MCI data set.
+
+```{r}
+count_of_buildings <- mutate(mci_initial, count(mci_initial, BBL))
+
+count_of_buildings <- sum(count_of_buildings$n)
+
+count_of_buildings
+```
+
+
+And here I am finding the average number of MCIs submitted per building.
+```{r}
+avg_apps_submitted <- mci_initial %>% 
+  mutate(total_apps = sum(mci_initial$AllApps)) %>%
+  summarize(avg_apps_per_building = unique(total_apps/count_of_buildings))
+
+avg_apps_submitted <- sum(avg_apps_submitted$avg_apps_per_building)
+
+avg_apps_submitted
+```
+
+And average approval rate.
+```{r}
+avg_approval_rate <- mci_initial %>% 
+  mutate(approval_rate =  (grantedfullpart / AllApps) * 100) %>% 
+  mutate(total_approval_rate = sum(approval_rate)) %>%
+  summarize(avg_approval_pct = unique(total_approval_rate/count_of_buildings))
+
+avg_approval_rate <- sum(avg_approval_rate$avg_approval_pct)
+
+avg_approval_rate
+```
+
+## Borough-level Data Analysis of MCI Data
+
+The MCI data set only lists BBLs and street addresses in terms of geographic identifiers. Since the first digit of the BBL corresponds to a borough:
+
+1 = Manhattan
+2 = Bronx
+3 = Brooklyn
+4 = Queens
+5 = Staten Island
+
+I extracted the first digit of the BBL to produce a list of borough codes [with the following Stack Overflow code](https://www.datasciencemadesimple.com/extract-substring-of-the-column-in-r-dataframe-2/) I modified the code with some [if else statements](https://www.datamentor.io/r-programming/ifelse-function/)
+
+```{r}
+mci_initial$boro_id = substr(mci_initial$BBL,0,1)
+
+mci_initial$borough <- if_else(
+  mci_initial$boro_id == 1, 'Manhattan',
+  if_else(mci_initial$boro_id == 2, 'Bronx',
+          if_else(mci_initial$boro_id == 3, 'Brooklyn',
+                  if_else(mci_initial$boro_id == 4, 'Queens',
+                          if_else(mci_initial$boro_id == 5, 'Staten Island', 
+                                  'NA')))))
+
+```
+
+I summarized how many MCI applications were submitted across all 5 boroughs from 2000-2014 as well as calculated how many apps were: accepted in full, partially accepted, denied, or awaiting decision.
+
+```{r}
+mci_summary <- mci_initial %>% 
+  group_by(borough) %>% 
+   summarize(total_apps = (sum(AllApps)), 
+             total_full_accepted_apps = (sum(grantedfull) ), 
+             total_partial_accepted = (sum(grantedfullpart) - sum(grantedfull)),
+             total_denied_apps = (sum(Denied)), 
+             total_undecided_apps = (sum(AllApps) - (sum(grantedfullpart) + sum(Denied))),
+             total_apps_2000 = (sum(X2000)),  
+             total_apps_2001 = (sum(X2001)), 
+             total_apps_2002 = (sum(X2002)), 
+             total_apps_2003 = (sum(X2003)), 
+             total_apps_2004 = (sum(X2004)), 
+             total_apps_2005 = (sum(X2005)), 
+             total_apps_2006 = (sum(X2006)), 
+             total_apps_2007 = (sum(X2007)), 
+             total_apps_2008 = (sum(X2009)), 
+             total_apps_2010 = (sum(X2010)), 
+             total_apps_2011 = (sum(X2011)), 
+             total_apps_2012 = (sum(X2012)), 
+             total_apps_2013 = (sum(X2013)), 
+             total_apps_2014 = (sum(X2014)), 
+             .groups = 'drop')
+
+```
+
+### How Many MCI Apps are Submitted in Each Borough? What were HCR's Decisions for those Apps?
+
+I made a stacked bar chart to represent the submitted MCI apps for all boroughs based on application status. I looked at this site for info on how to make [stacked bar charts.](https://www.r-graph-gallery.com/48-grouped-barplot-with-ggplot2.html) 
+
+I also looked at this [Stack Overflow post about removing numbers for values that are too small to show up legibly on the chart.](https://stackoverflow.com/questions/40445986/ggplot2-bar-plot-hjust-depending-on-bar-and-label-size)
+
+
+```{r}
+mci_summary_bar <- mci_summary[c(1, 3:6)] %>% 
+  pivot_longer(
+    starts_with("total_"),  
+    names_to = "app_status", 
+    values_to = "number_of_filings" 
+  ) 
+
+mci_bar_by_numbers <- 
+  ggplot(mci_summary_bar, 
+         aes(fill = app_status, 
+             y =number_of_filings, 
+             x=borough,   
+             label=ifelse(number_of_filings <0.04*max(number_of_filings), "", number_of_filings))) + 
+  geom_bar(position="stack", 
+           stat="identity") +
+  geom_text(size = 3, 
+            position = position_stack(vjust = 0.5)) +
+  scale_y_continuous(breaks = seq(0, 6000, by = 500)) +
+  labs(
+    title = "Status of MCI Applications in NYC",
+    subtitle = "From 2000 to 2014",
+    x = "Borough",
+    y = "Number of Applications",
+    color = "Borough",
+    caption = "Source: NYS Housing and Community Renewal (HCR) via Urban Justice Center's FOIL Request"
+  ) +
+  scale_fill_discrete(name = "Status of MCI App", 
+                      labels = c("Denied", 
+                                 "Fully Granted", 
+                                 "Partially Granted", 
+                                 "Awaiting Decision")) +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5, 
+                                  size =14, 
+                                  face="bold"), 
+        plot.subtitle = element_text(hjust = 0.5), 
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"),
+        legend.text=element_text(size=10)) 
+
+plot(mci_bar_by_numbers) 
+
+
+```
+
+Because Staten Island had considerably fewer MCI apps than the other boroughs, its values did not show up on the NYC-wide bar chart. I still wanted to represent Staten Island so made a separate bar chart just for SI and then for on my Medium post, used an image editor to add the SI barchart onto the NYC-wide graph.
+
+```{r}
+
+mci_long_bar_si <- subset(mci_summary_bar, borough == "Staten Island")
+
+mci_bar_si <- 
+  ggplot(mci_long_bar_si, 
+         aes(fill = app_status, 
+             y = number_of_filings, 
+             x = borough,
+             label = number_of_filings)) + 
+  geom_bar(position="stack", 
+           stat="identity") +
+  geom_text(size = 10, 
+            position = position_stack(vjust = 0.5)) +
+  scale_y_continuous(breaks = seq(0, 50, by = 10)) +
+  labs(
+    title = "Status of MCI Applications in Staten Island",
+    subtitle = "From 2000 to 2014",
+    x = "Borough",
+    y = "Number of Applications",
+    color = "Borough",
+    caption = "Source: NYS Housing and Community Renewal"
+  ) +
+  scale_fill_discrete(name = "Status of MCI App", 
+                      labels = c("Denied", 
+                                 "Fully Granted", 
+                                 "Partially Granted", 
+                                 "Awaiting Decision")) +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5)) 
+
+plot(mci_bar_si)
+
+```
+
+### At What Rate Does HCR Approve/Deny MCI Apps Across NYC?
+
+Because of the wide range in the number of applications submitted, I wanted to also represent the MCI application statuses proportionally.
+
+```{r}
+mci_summary_percent <- mci_summary[c(1:6)] %>% 
+  group_by(borough) %>% 
+  mutate(percentage_full_accepted =
+           round((total_full_accepted_apps/total_apps)*100,
+                 digits=1),
+         percentage_partial_accepted =
+           round((total_partial_accepted/total_apps)*100,
+                 digits=1), 
+         percentage_denied =
+           round((total_denied_apps/total_apps)*100, digits=1),
+         percentage_undecided
+         =round((total_undecided_apps/total_apps)*100,
+                digits=1))
+
+mci_summary_percent <- mci_summary_percent[c(1,7:10)]
+
+mci_long_percent <- mci_summary_percent %>% 
+  pivot_longer(
+    starts_with("percentage_"),  
+    names_to = "percentage_of", 
+    values_to = "total_percentage" 
+  ) 
+```
+
+```{r}
+
+mci_bar_percent_v2 <- ggplot(mci_long_percent, 
+                             aes(fill = percentage_of, 
+                                 y =total_percentage,
+                                 x=borough,
+                                 label=total_percentage)) +
+  geom_bar(position="stack", 
+           stat="identity") +
+  geom_text(size = 3, 
+            position = position_stack(vjust = 0.5)) +
+  labs(
+    title = "Overall MCI Application Status by Percentage",
+    subtitle = "From 2000 to 2014",
+    x = "Borough",
+    y = "Percentage (%)",
+    color = "Borough",
+    caption = "Source: NYS Housing and Community Renewal (HCR)
+    via Urban Justice Center's FOIL Request") +
+  scale_fill_discrete(name = "Status of MCI App", 
+                      labels = c("Denied", 
+                                 "Fully Granted", 
+                                 "Partially Granted", 
+                                 "Awaiting Decision")) +
+  theme_classic() +
+  theme(
+    plot.title = element_text(hjust = 0.5, 
+                              size =14, 
+                              face="bold"), 
+        plot.subtitle = element_text(hjust = 0.5), 
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=14,
+                                face="bold"),
+        legend.text=element_text(size=10)) 
+
+
+plot(mci_bar_percent_v2)
+
+```
+
+### How did MCI Filings Change Over Time? (2000-2014)
+
+I created a line graph to represent all MCI applications submitted in all 5 boroughs from 2000-2014.
+
+```{r}
+mci_graph <- mci_summary[-c(2,3)]
+
+mci_long <- mci_graph %>% 
+  pivot_longer(
+    starts_with("total_apps_"),  
+    names_to = "year", 
+    values_to = "filings" 
+  ) %>%  
+  mutate(year = as.numeric(gsub("total_apps_","", year)))
+
+```
+
+
+```{r}
+mci_graph <- ggplot(mci_long, 
+                    aes(x = year, 
+                        y = filings, 
+                        color = borough)) + 
+  geom_line() +
+  geom_point() +
+  scale_x_continuous(breaks = seq(2000, 2014, by = 1)) +
+  scale_y_continuous(breaks = seq(0, 600, by = 50)) +
+labs(
+    title = "Total MCI Filings in NYC",
+    subtitle = "From 2000 to 2014",
+    x = "Year",
+    y = "MCI Filings",
+    color = "Borough",
+    caption = "Source: NYS Housing and Community Renewal (HCR)
+    via Urban Justice Center's FOIL Request"
+  ) +
+  theme_classic() +
+  theme(
+    plot.title = element_text(hjust = 0.5, 
+                              size =14, 
+                              face="bold"), 
+        plot.subtitle = element_text(hjust = 0.5), 
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=14,
+                                face="bold"),
+        legend.text=element_text(size=12))
+
+plot(mci_graph)
+```
+
+
+## Maps of MCI Data
+
+I copied Maxwell's spatial data demo to make the following maps. [link to demo](https://rstudio.cloud/project/1753427)
+
+```{r}
+remotes::install_github("austensen/geoclient")
+
+library(geoclient)
+
+geoclient_api_keys(id = "5da5f494", key = "ead9925526eef511a79402485b2e1898")
+
+```
+
+```{r}
+nyc_tracts <- read_sf("nyct2010_20c/nyct2010.shp") %>%
+  st_transform(2263)
+```
+
+### Map of MCI Applications Submitted Per BBL
+
+For my first map, I created a map of total MCI applications submitted per BBL.
+
+```{r}
+mci_overall_map <- mci_initial[, c("BBL", "AllApps")]
+
+mci_overall_geocode_results <- mci_overall_map %>%
+  geo_bbl_data(BBL)
+
+```
+
+```{r}
+mci_overall_geocode_results_slim <- mci_overall_geocode_results %>% 
+  select(latitudeInternalLabel, 
+         longitudeInternalLabel, 
+         bbl)
+
+mci_overall_w_latlon <- bind_cols(mci_overall_map,mci_overall_geocode_results_slim)
+
+```
+
+```{r}
+mci_overall_sf <- mci_overall_w_latlon %>% 
+  filter(!is.na(latitudeInternalLabel)) %>% 
+  st_as_sf(coords = c("longitudeInternalLabel", "latitudeInternalLabel"), crs = 4326) %>% 
+  st_transform(2263)
+```
+
+```{r}
+mci_overall_joined <- nyc_tracts %>% 
+  st_join(mci_overall_sf, join = st_contains) 
+
+```
+
+Because there were NYC tracts that did not have any MCI applications, the resulting NA values made producing the map difficult. In order to ensure the scale_fill_manual() function worked, I set all NA values for the AllApps column (representing all applications submitted) to 999.  
+
+I wanted to customize the legend breaks and learned how to do so [from this Stack Overflow post.](https://stackoverflow.com/questions/56986196/specifying-specific-breaks-in-legend-using-ggplot2)
+
+```{r}
+mci_overall_joined <- mutate_at(mci_overall_joined, c("AllApps"), ~replace(., is.na(.), 999))
+
+breaks_custom <- c(0, 1, 5, 10, 30, 50, 70, 200, 999) 
+
+mci_overall_joined <- mutate(mci_overall_joined, all_apps_test = cut(AllApps, breaks_custom, labels = c('1', '2-5', '6-10', '11-30','31-50','51-70', 'Over 70', 'None')))
+```
+
+All the hex codes and color palettes were selected from [this website.](https://bl.ocks.org/emeeks/8cdec64ed6daf955830fa723252a4ab3)
+```{r}
+my_colors <- c("#313695","#4575b4", "#abd9e9","#fee090","#f46d43","#a50026", "#bdbdbd") 
+
+
+ggplot(mci_overall_joined) +
+  aes(fill = all_apps_test) +
+  geom_sf(color = "white", size = 0.05) +
+  scale_fill_manual(name = "# of MCI Apps", 
+                    values = my_colors ) +
+  theme_void() +
+  labs(
+    title = "Overall Number of MCI Applications Submitted in NYC
+    Per BBL \n From 2000-2014",
+    fill = NULL,
+    caption = "Sources: NYS Housing and Community Renewal (HCR)
+    via Urban Justice Center's FOIL Request"
+  ) +
+theme(legend.position = c(0.1, 0.7), 
+       plot.title = element_text(hjust = 0.5, 
+                                 size = 14, 
+                                 face = "bold"), 
+       plot.caption = element_text(hjust = 1, 
+                                   size = 12),
+       legend.text = element_text(size = 12))
+
+```
+
+
+### Map of MCI Approval Rates Per BBL
+
+For my second map, I wanted to represent the MCI approval rate per BBL. 
+
+```{r}
+mci_approved_map <- mci_initial[, c("grantedfullpart")]
+
+mci_approved_w_latlon <- cbind(mci_overall_w_latlon, mci_approved_map)
+
+mci_approved_w_latlon_pct <- mutate(mci_approved_w_latlon, approved_pct = if_else(mci_approved_w_latlon$grantedfullpart != 0, ((grantedfullpart / AllApps)*100), if_else(mci_approved_w_latlon$grantedfullpart == 0, 0, 999)))
+
+
+```
+
+```{r}
+mci_approved_sf <- mci_approved_w_latlon_pct %>% 
+  filter(!is.na(latitudeInternalLabel)) %>% 
+  st_as_sf(coords = c("longitudeInternalLabel", "latitudeInternalLabel"), crs = 4326) %>% 
+  st_transform(2263)
+```
+
+
+```{r}
+mci_approved_joined <- nyc_tracts %>% 
+  st_join(mci_approved_sf, join = st_contains) 
+
+```
+
+
+```{r}
+mci_approved_joined <- mutate_at(mci_approved_joined, c("approved_pct"), ~replace(., is.na(.), 999))
+
+breaks_custom <- c(-1, 1, 20, 40, 60, 80, 100, 999) 
+
+mci_approved_joined <- mutate(mci_approved_joined, pct_test = cut(approved_pct, breaks_custom, labels = c('0%', '1-20%', '20-40%', '40-60%', '60-80%', '80-100%', 'None')))
+```
+
+```{r}
+my_colors_v2 <- c("#313695","#4575b4", "#abd9e9","#fee090","#f46d43","#a50026", "#bdbdbd") 
+
+ggplot(mci_approved_joined) +
+  aes(fill = pct_test) +
+  geom_sf(color = "white", size = 0.05) +
+  scale_fill_manual(name = "% of MCI Apps", values = my_colors_v2 ) +
+  theme_void() +
+  labs(
+    title = "Percentage of Submitted MCIs that Were Approved in
+    NYC Per BBL \n From 2000-2014",
+    fill = NULL,
+    caption = "Sources: NYS Housing and Community Renewal (HCR)
+    via Urban Justice Center's FOIL Request"
+  ) +
+ theme(legend.position = c(0.1, 0.7), 
+       plot.title = element_text(hjust = 0.5, 
+                                 size = 14, 
+                                 face = "bold"), 
+       plot.caption = element_text(hjust = 1, 
+                                   size = 12),
+       legend.text = element_text(size = 12))
+```
+
+
+
+## NYC Department of Finance's J-51 Data
+
+I used the following url to get the J-51 tax abatement filings from DOF for the tax years 2000-2014: https://data.cityofnewyork.us/resource/y7az-s7wc.csv?$query=select b, block, lot, ex_years, tax_year  where tax_year > '1999' and tax_year < '2015' limit 10000000
+
+```{r}
+
+tax_filings <- read_csv("dof_j51_data.csv")
+
+
+```
+
+The DOF data set interestingly had each element of the BBL in its own separate column. In order to join the DOF data with the MCI data, I added leading zeros to columns that needed it (BBLs follow a 1 digit-5 digit-4 digit format). I looked at [this Stack Overflow post for info on the sprintf function and how to add leading zeros](https://stackoverflow.com/questions/5812493/how-to-add-leading-zeros)
+
+I looked at this Stack Overflow Post for [info on uniting multiple columns without spaces.](https://stackoverflow.com/questions/18115550/combine-two-or-more-columns-in-a-dataframe-into-a-new-column-with-a-new-name)
+```{r}
+
+tax_filings$block <- sprintf("%05d", tax_filings$block)
+
+tax_filings$lot <- sprintf("%04d", tax_filings$lot)
+
+tax_filings <- unite(tax_filings, BBL, c("b", "block", "lot"), sep = "")
+
+tax_filings$BBL <- as.numeric(tax_filings$BBL)
+
+```
+ 
+Now that the BBLs were uniform for both data sets, I joined them. 
+```{r}
+mci_j51_buildings <- inner_join(tax_filings, mci_initial, by = "BBL")
+
+```
+
+I wanted to only look at buildings that had an active J-51 and an approved MCI so I filtered out all buildings that did not have an approved MCI.
+
+```{r}
+mci_j51_buildings_small <-
+mci_j51_buildings[mci_j51_buildings$grantedfullpart > 0,]
+```
+
+Some buildings had multiple J-51 entries for the 2000-2014 tax years. As the MCI data set did not specify for which years the MCI was approved and only provided an overall number of approved MCIs, I wanted to make sure that the J-51 data I had overlapped as much as possible with the 2000-2014 time range. 
+
+For each BBL, I kept J-51's that were filed in 2000 and that when the tax year was added to the years left to the J-51 exemption, it was equal to or greater than 2014. 
+
+```{r}
+mci_j51_latest<- mci_j51_buildings_small %>% 
+  group_by(BBL) %>% 
+  filter(tax_year == 2000 & (tax_year + ex_years >= 2014)) 
+
+mci_j51_final <- mci_j51_latest[!duplicated(mci_j51_latest$BBL),]
+
+```
+
+Now that I have a data frame with buildings that had an approved MCI and J-51 during the 2000-2014 period. I shared the results in a table. I looked at [info on DT here.](https://rstudio.github.io/DT/) [I also consulted this site.](https://rstudio.github.io/DT/options.html)
+
+In theory, a concerned tenant who lives in a building that had a MCI sometime between 2000-2014, could search their address in the table and see if the building also had a J-51 tax benefit. 
+
+```{r}
+mci_j51_latest_sample <- select(mci_j51_final, 
+                                BBL, 
+                                ex_years, 
+                                tax_year, 
+                                Address, 
+                                AllApps, 
+                                grantedfullpart, 
+                                grantedfull, 
+                                Denied) %>% 
+  rename("Exemption Years" = "ex_years", 
+         "Tax Year" = "tax_year", 
+         "Total # of MCIs" = "AllApps", 
+         "# of MCIs Granted in Full or Partial" = "grantedfullpart", 
+         "# of MCIs Granted in Full" = "grantedfull", 
+         "# of MCIs Denied" = "Denied")
+
+mci_j51_latest_sample <- mci_j51_latest_sample[, c(1, 4, 2, 3, 5, 6, 7, 8) ]
+
+datatable(head(mci_j51_latest_sample, 1000), 
+          options = list(
+            columnDefs = list(list(className = 'dt-center',
+                                   targets = 5)),
+            pageLength = 5,
+            lengthMenu = c(5, 10, 15, 20)
+))
+
+ 
+```
