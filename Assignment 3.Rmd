@@ -1,0 +1,88 @@
+---
+title: "Assignment 3"
+author: "Winnie Shen"
+date: "11/2/2020"
+output: html_document
+---
+
+---
+title: "Assignment 3"
+author: "Winnie Shen"
+date: "11/1/2020"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(sf)
+library(janitor)
+library(lubridate)
+```
+
+I used DHS's dataset [on shelter buildings per community district](https://data.cityofnewyork.us/Social-Services/Buildings-by-Borough-and-Community-District/3qem-6v3v/data). I cleaned up the date column and kept only the values for 2020.
+```{r}
+shelters_map <- read_csv("Downloads/Buildings_by_Borough_and_Community_District.csv")
+
+shelters_map_updated <- shelters_map %>%
+  rename(boro_cd = "Community District") %>% 
+  janitor::clean_names()
+
+
+shelters_map_updated$report_date <- as.Date(shelters_map_updated$report_date, "%m/%d/%Y")
+
+shelters_map_final <- filter(shelters_map_updated, report_date > "2019-12-31")
+```
+
+I selected most recent report date for each CD [using this post](https://stackoverflow.com/questions/4310326/convert-character-to-date-in-r)
+```{r}
+shelters_map_most_recent <- shelters_map_final %>%
+  group_by(boro_cd) %>% 
+  slice(which.max(report_date))
+```
+
+I transformed all the columns to be numeric as well as replaced the NA values with zeros because QGIS wasn't able to display the content of certain columns as graduated values because of it. 
+```{r}
+shelter_map_cleaned <- shelters_map_most_recent %>%
+   mutate_if(is.numeric, funs(ifelse(is.na(.), 0, .)))
+
+shelter_map_cleaned$total_shelters <- as.numeric(rowSums(shelter_map_cleaned[,4:10]))
+```
+
+
+I copied Maxwell's spatial data demo to make a map of the Flushing West rezoning. [link to demo](https://rstudio.cloud/project/1753427)
+
+```{r}
+remotes::install_github("austensen/geoclient")
+
+library(geoclient)
+
+geoclient_api_keys(id = "5da5f494", key = "ead9925526eef511a79402485b2e1898")
+```
+
+I used the NYC DCP's Community Districts map, which contained the geometries I needed to map everything on QGIS. 
+
+```{r}
+
+nyc_cd <- read_sf("Downloads/nycd_20c/nycd.shp")%>%
+  janitor::clean_names() %>% 
+  st_transform(2263)
+
+```
+
+I joined the shelter_map_cleaned with the nyc_cd to create my final CSV file that I used for my QGIS project.
+
+```{r}
+shelter_overall_joined <- left_join(nyc_cd, shelter_map_cleaned, by="boro_cd")
+
+shelter_final <- shelter_overall_joined %>% mutate_if(is.numeric, funs(ifelse(is.na(.), 0, .)))
+```
+
+I converted the geometry column with st_as_text to make it Well Known Text so that QGIS could display the polygons. I learned about the function [from this website.](https://cran.r-project.org/web/packages/sf/vignettes/sf1.html)
+```{r}
+shelter_final$geometry <- st_as_text(shelter_final$geometry)
+```
+
+```{r}
+write_csv(shelter_final, "Downloads/shelter_map_cd_v3.csv")
+```
+
